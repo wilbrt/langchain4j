@@ -22,6 +22,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -65,8 +67,21 @@ class PgVectorEmbeddingStoreIT extends EmbeddingStoreWithFilteringIT {
         return true;
     }
 
-    @Test
-    void test_escape_in() {
+    @ParameterizedTest
+    @EnumSource(PgVectorEmbeddingStore.VectorType.class)
+    void test_escape_in(PgVectorEmbeddingStore.VectorType vectorType) {
+        EmbeddingStore<TextSegment> store = PgVectorEmbeddingStore.builder()
+                .host(pgVector.getHost())
+                .port(pgVector.getFirstMappedPort())
+                .user("test")
+                .password("test")
+                .database("test")
+                .table("test" + nextInt(1000, 2000))
+                .dimension(384)
+                .dropTableFirst(true)
+                .vectorType(vectorType)
+                .build();
+
         TextSegment[] segments = new TextSegment[] {
             TextSegment.from("toEscape", Metadata.from(Map.of("text", "This must be escaped '"))),
             TextSegment.from("notEscape", Metadata.from(Map.of("text", "This does not require to be escaped")))
@@ -77,8 +92,7 @@ class PgVectorEmbeddingStoreIT extends EmbeddingStoreWithFilteringIT {
             embeddings.add(embedding);
         }
 
-        List<String> ids = embeddingStore().addAll(embeddings, Arrays.asList(segments));
-        awaitUntilAsserted(() -> assertThat(getAllEmbeddings()).hasSameSizeAs(segments));
+        List<String> ids = store.addAll(embeddings, Arrays.asList(segments));
 
         // In filter escapes values as well
         Filter filterIN = metadataKey("text").isIn("This must be escaped '");
@@ -88,7 +102,7 @@ class PgVectorEmbeddingStoreIT extends EmbeddingStoreWithFilteringIT {
                 .filter(filterIN)
                 .build();
 
-        EmbeddingSearchResult<TextSegment> searchResult = embeddingStore().search(inSearchRequest);
+        EmbeddingSearchResult<TextSegment> searchResult = store.search(inSearchRequest);
         EmbeddingMatch<TextSegment> match = searchResult.matches().get(0);
         assertThat(match.score()).isCloseTo(1, withPercentage(1));
         assertThat(match.embeddingId()).isEqualTo(ids.get(0));
@@ -101,7 +115,7 @@ class PgVectorEmbeddingStoreIT extends EmbeddingStoreWithFilteringIT {
                 .filter(filterNotIN)
                 .build();
 
-        searchResult = embeddingStore().search(notInSearchRequest);
+        searchResult = store.search(notInSearchRequest);
         match = searchResult.matches().get(0);
         // It must retrieve the second embedding
         assertThat(match.embeddingId()).isEqualTo(ids.get(1));
